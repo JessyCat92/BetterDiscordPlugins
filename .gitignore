@@ -1,0 +1,15 @@
+# BetterDiscord user settings and local data
+*.config.json
+*.data.json
+
+# Credentials and local tooling
+.env
+.env.*
+*.pem
+*.key
+.codex/
+.agents/
+node_modules/
+*.log
+Thumbs.db
+.DS_Store
