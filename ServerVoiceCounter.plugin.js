@@ -1,11 +1,11 @@
 /**
  * @name Server Voice Counter
  * @author Jessi
- * @version 1.3.1
+ * @version 1.3.2
  * @description Show a green speaker indicator on servers with occupied visible voice or stage channels, with an optional participant count.
  * @authorLink https://github.com/JessyCat92
  * @website https://github.com/JessyCat92/BetterDiscordPlugins
- * @source https://github.com/JessyCat92/BetterDiscordPlugins/blob/main/voiceIcon.plugin.js
+ * @source https://github.com/JessyCat92/BetterDiscordPlugins/blob/main/ServerVoiceCounter.plugin.js
  */
 
 const LABELS = {
@@ -26,7 +26,7 @@ const LABELS = {
 };
 
 module.exports = class VoiceIcon {
-    // Keep the legacy filename, CSS and Data namespace to preserve existing installations.
+    // Keep the legacy CSS and Data namespace to preserve existing settings.
     getName() { return "Server Voice Counter"; }
 
     // DisplayServersAsChannels 2.0.5 / BDFDB's dedicated class mapping.

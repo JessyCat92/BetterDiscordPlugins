@@ -1,9 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const VoiceIcon = require("../voiceIcon.plugin.js");
+const VoiceIcon = require("../ServerVoiceCounter.plugin.js");
 
 test("product name matches metadata and remains identical in both languages", () => {
-    const source = require("node:fs").readFileSync(require.resolve("../voiceIcon.plugin.js"), "utf8");
+    const source = require("node:fs").readFileSync(require.resolve("../ServerVoiceCounter.plugin.js"), "utf8");
     assert.match(source, /@name Server Voice Counter\r?\n/);
     const state = setup("de");
     const plugin = new VoiceIcon();

@@ -37,13 +37,13 @@ Discord must be running and connected. The plugin only uses voice state data rec
 
 ## Server Voice Counter
 
-Version **1.3.1** displays a **green speaker icon on the server icon** whenever at least one visible voice or stage channel on that server is occupied. This lets you spot active servers directly in the server list.
+Version **1.3.2** displays a **green speaker icon on the server icon** whenever at least one visible voice or stage channel on that server is occupied. This lets you spot active servers directly in the server list.
 
 - An optional **participant count** can be enabled in the plugin settings. It counts people in visible voice and stage channels, including yourself.
 - Also supports the server name layout provided by **DisplayServersAsChannels**, displaying the indicator next to the name.
 - The indicator updates as channel occupancy changes.
 
-**File:** [voiceIcon.plugin.js](voiceIcon.plugin.js) (filename retained for compatible updates; formerly named voiceIcon). German and English follow Discord's language, with English as fallback. Existing participant-count settings are preserved. When upgrading from the old name, check the plugin's enabled switch: BetterDiscord stores activation separately by plugin name.
+**File:** [ServerVoiceCounter.plugin.js](ServerVoiceCounter.plugin.js) (formerly `voiceIcon.plugin.js`). German and English follow Discord's language, with English as fallback. Existing participant-count settings are preserved. For this filename change, close Discord, remove the old `voiceIcon.plugin.js` from the plugins folder, and place `ServerVoiceCounter.plugin.js` there before reopening Discord. Keep `voiceIcon.config.json`: the internal settings key is unchanged. Do not install both plugin files. Activation remains associated with `Server Voice Counter`; if upgrading from the older visible name `voiceIcon`, check the enabled switch. Old download/update URLs do not redirect automatically; switch to the new file link for future updates.
 
 ## Installation
 
@@ -81,10 +81,10 @@ Run syntax checks and each test file separately (Node.js 25; tests mock Discord 
 ```powershell
 node --check FriendVoiceNotify.plugin.js
 node --check GameActivityToggleExtension.plugin.js
-node --check voiceIcon.plugin.js
+node --check ServerVoiceCounter.plugin.js
 node --test --test-isolation=none tests/FriendVoiceNotify.test.js
 node --test --test-isolation=none tests/GameActivityToggleExtension.test.js
-node --test --test-isolation=none tests/voiceIcon.test.js
+node --test --test-isolation=none tests/ServerVoiceCounter.test.js
 ```
 
 All **38 automated tests** pass: 28 for Game Activity Toggle Erweiterung, 4 for FriendVoiceNotify, and 6 for Server Voice Counter. They cover German/English and fallback behavior, language selection and refresh, settings persistence, notification text, participant counting and visibility filtering, scheduling, overlapping/adjacent/overnight windows, migration, pause/resume, account isolation, and restoration after simulated restarts or failed writes.
