@@ -1,16 +1,87 @@
 /**
  * @name FriendVoiceNotify
  * @author Jessi
- * @version 1.0.4
+ * @version 1.1.0
  * @description Get notified when selected users join visible voice channels on shared servers, including server and channel names.
  * @authorLink https://github.com/JessyCat92
  * @website https://github.com/JessyCat92/BetterDiscordPlugins
  * @source https://github.com/JessyCat92/BetterDiscordPlugins/blob/main/FriendVoiceNotify.plugin.js
  */
 
+const LABELS = {
+    en: {
+        description: "Get notified when selected users join visible voice channels on shared servers, including server and channel names.",
+        missingModule: "Missing Discord module: {method}", dispatcherError: "Discord dispatcher not found (dispatch/subscribe/unsubscribe).",
+        menu: "Voice notifications", enabled: "Voice notifications enabled.", disabled: "Voice notifications disabled.",
+        joined: "{name} joined {guild} → {channel}", moved: "{name} moved to {guild} → {channel}",
+        title: "Voice notification", desktopError: "Desktop notification failed",
+        desktop: "Desktop notifications", desktopNote: "Show desktop notifications in addition to in-app alerts. Requires notification permission for Discord.",
+        moves: "Notify on channel changes", movesNote: "Also notify when a selected user switches between voice or stage channels on the same server.",
+        failed: "FriendVoiceNotify could not run. See the console for details."
+    },
+    de: {
+        description: "Benachrichtigt dich, wenn markierte Benutzer sichtbare Sprachkanäle auf gemeinsamen Servern betreten, inklusive Server- und Channelnamen.",
+        missingModule: "Discord-Modul fehlt: {method}", dispatcherError: "Discord-Ereignisverteiler nicht gefunden (dispatch/subscribe/unsubscribe).",
+        menu: "Voice-Benachrichtigung", enabled: "Voice-Benachrichtigung aktiviert.", disabled: "Voice-Benachrichtigung deaktiviert.",
+        joined: "{name} betritt {guild} → {channel}", moved: "{name} wechselt in {guild} → {channel}",
+        title: "Voice-Benachrichtigung", desktopError: "Desktop-Benachrichtigung fehlgeschlagen",
+        desktop: "Desktop-Benachrichtigungen", desktopNote: "Zusätzlich zur Meldung in Discord. Benötigt die Benachrichtigungsfreigabe für Discord.",
+        moves: "Auch Channelwechsel melden", movesNote: "Meldet auch den Wechsel zwischen Voice- oder Stage-Kanälen desselben Servers.",
+        failed: "FriendVoiceNotify konnte nicht ausgeführt werden. Details stehen in der Konsole."
+    }
+};
+
 module.exports = class FriendVoiceNotify {
+    language() {
+        if (!this.localeResolved) {
+            // Optional localization modules must never prevent the plugin from starting.
+            try { this.localeStore = BdApi.Webpack.getStore("LocaleStore"); } catch {}
+            try {
+                this.localeModule = BdApi.Webpack.getModule(value =>
+                    typeof value?.chosenLocale === "string" || typeof value?._chosenLocale === "string", {searchExports: true});
+            } catch {}
+            this.localeResolved = true;
+        }
+        let stored;
+        try { stored = this.localeStore?.getLocale?.(); } catch {}
+        const locale = stored || this.localeModule?.chosenLocale || this.localeModule?._chosenLocale ||
+            globalThis.document?.documentElement?.getAttribute("lang") || "en";
+        return /^de(?:[-_]|$)/i.test(locale) ? "de" : "en";
+    }
+
+    t(key, values = {}) {
+        return (LABELS[this.language()][key] ?? LABELS.en[key] ?? key)
+            .replace(/\{(\w+)\}/g, (placeholder, name) => values[name] == null ? placeholder : String(values[name]));
+    }
+
+    getDescription() { return this.t("description"); }
+
+    watchLanguage(refresh) {
+        this.language();
+        const store = this.localeStore;
+        const subscribed = typeof store?.addChangeListener === "function" && typeof store?.removeChangeListener === "function";
+        if (subscribed) store.addChangeListener(refresh);
+        let observer;
+        if (globalThis.document?.documentElement && typeof MutationObserver !== "undefined") {
+            observer = new MutationObserver(refresh);
+            observer.observe(document.documentElement, {attributes: true, attributeFilter: ["lang"]});
+        }
+        this.localePanelCleanups ??= new Set();
+        let cleaned = false;
+        const cleanup = () => {
+            if (cleaned) return;
+            cleaned = true;
+            if (subscribed) store.removeChangeListener(refresh);
+            observer?.disconnect();
+            this.localePanelCleanups.delete(cleanup);
+        };
+        this.localePanelCleanups.add(cleanup);
+        return cleanup;
+    }
+
     start() {
         this.stop();
+        this.localeResolved = false;
         this.cleanups = [];
         this.notifications = new Set();
         try {
@@ -25,7 +96,7 @@ module.exports = class FriendVoiceNotify {
                 [this.users, "getCurrentUser"], [this.users, "getUser"],
                 [this.permissions, "can"], [this.dispatcher, "subscribe"],
                 [this.dispatcher, "unsubscribe"]]) {
-                if (typeof object?.[method] !== "function") throw new Error(`Missing Discord module: ${method}`);
+                if (typeof object?.[method] !== "function") throw new Error(this.t("missingModule", {method}));
             }
             this.options = {desktop: true, moves: false, ...BdApi.Data.load("FriendVoiceNotify", "options")};
             this.running = true;
@@ -68,7 +139,7 @@ module.exports = class FriendVoiceNotify {
             const candidate = BdApi.Webpack.getModule(isDispatcher, {searchExports});
             if (isDispatcher(candidate)) return candidate;
         }
-        throw new Error("Discord dispatcher not found (dispatch/subscribe/unsubscribe).");
+        throw new Error(this.t("dispatcherError"));
     }
 
     patchUserMenu(tree, props, instance) {
@@ -98,7 +169,7 @@ module.exports = class FriendVoiceNotify {
         const item = BdApi.ContextMenu.buildItem({
             type: "toggle",
             id: "friend-voice-notify-toggle",
-            label: "Voice notifications",
+            label: this.t("menu"),
             checked: this.watched.has(userId),
             action: () => this.toggle(userId)
         });
@@ -149,7 +220,7 @@ module.exports = class FriendVoiceNotify {
             }
         }
         BdApi.Data.save("FriendVoiceNotify", `users-${this.accountId}`, [...this.watched]);
-        BdApi.UI.showToast(this.watched.has(userId) ? "Voice notifications enabled." : "Voice notifications disabled.", {type: "success"});
+        BdApi.UI.showToast(this.t(this.watched.has(userId) ? "enabled" : "disabled"), {type: "success"});
     }
 
     process(states) {
@@ -181,27 +252,37 @@ module.exports = class FriendVoiceNotify {
     notify(userId, guild, channel, moved) {
         const user = this.users.getUser(userId);
         const name = user?.globalName || user?.username || userId;
-        const text = `${name} ${moved ? "moved to" : "joined"} ${guild.name} → ${channel.name}`;
+        const text = this.t(moved ? "moved" : "joined", {name, guild: guild.name, channel: channel.name});
         BdApi.UI.showToast(text, {type: "info", timeout: 8000});
         if (!this.options.desktop || typeof Notification === "undefined" || Notification.permission !== "granted") return;
         try {
-            const notification = new Notification("Voice notification", {body: text});
+            const notification = new Notification(this.t("title"), {body: text});
             this.notifications.add(notification);
             notification.onclose = () => this.notifications.delete(notification);
             notification.onclick = () => { window.focus(); notification.close(); };
             notification.onerror = () => { notification.close(); this.notifications.delete(notification); };
         }
-        catch (error) { console.warn("[FriendVoiceNotify] Desktop notification failed", error); }
+        catch (error) { console.warn("[FriendVoiceNotify]", this.t("desktopError"), error); }
     }
 
     getSettingsPanel() {
+        const plugin = this;
+        const React = BdApi.React;
+        return React.createElement(function LocalizedVoiceSettings() {
+            const [, redraw] = React.useState(0);
+            React.useEffect(() => plugin.watchLanguage(() => redraw(value => value + 1)), []);
+            return React.createElement("div", {lang: plugin.language(), key: plugin.language()}, plugin.buildSettingsPanel());
+        });
+    }
+
+    buildSettingsPanel() {
         const options = this.options ?? {desktop: true, moves: false, ...BdApi.Data.load("FriendVoiceNotify", "options")};
         return BdApi.UI.buildSettingsPanel({
             settings: [
-                {type: "switch", id: "desktop", name: "Desktop notifications", value: options.desktop,
-                    note: "Show desktop notifications in addition to in-app alerts. Requires notification permission for Discord."},
-                {type: "switch", id: "moves", name: "Notify on channel changes", value: options.moves,
-                    note: "Also notify when a selected user switches between voice or stage channels on the same server."}
+                {type: "switch", id: "desktop", name: this.t("desktop"), value: options.desktop,
+                    note: this.t("desktopNote")},
+                {type: "switch", id: "moves", name: this.t("moves"), value: options.moves,
+                    note: this.t("movesNote")}
             ],
             onChange: (_category, id, value) => {
                 if (!["desktop", "moves"].includes(id)) return;
@@ -215,7 +296,7 @@ module.exports = class FriendVoiceNotify {
     fail(error) {
         console.error("[FriendVoiceNotify]", error);
         this.stop();
-        BdApi.UI.showToast("FriendVoiceNotify could not run. See the console for details.", {type: "error"});
+        BdApi.UI.showToast(this.t("failed"), {type: "error"});
     }
 
     stop() {
@@ -225,6 +306,7 @@ module.exports = class FriendVoiceNotify {
             try { cleanup?.(); } catch (error) { console.warn("[FriendVoiceNotify]", error); }
         }
         this.cleanups = [];
+        for (const cleanup of this.localePanelCleanups ?? []) cleanup();
         for (const notification of this.notifications ?? []) notification.close();
         this.notifications?.clear();
         this.previous?.clear();

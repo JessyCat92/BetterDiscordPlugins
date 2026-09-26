@@ -2,9 +2,11 @@
 
 Plugins for the Discord desktop app with BetterDiscord for voice channel notifications, indicators, and scheduled game activity visibility. Each plugin can be used independently.
 
+All three plugins automatically use **German when Discord is set to German, and English otherwise**. They follow Discord's language setting rather than the OS/browser language; unsupported or unavailable languages fall back to English. Settings, plugin-owned messages, and applicable tooltips and menu labels are localized. Existing configuration is retained, with no separate language preference to manage.
+
 ## Game Activity Toggle Erweiterung
 
-Adds a weekly schedule for Discord game activity visibility, with a persistent automation pause switch. Version **1.1.3** uses German interface labels.
+Adds a weekly schedule for Discord game activity visibility, with a persistent automation pause switch. Version **1.2.0** automatically uses **German or English based on Discord's language setting**, with English as the fallback for other languages. Settings, weekdays, buttons, tooltips, notifications, and accessibility labels are translated. Language changes refresh the icon and open settings without changing your schedule; no separate language preference is stored. The plugin's identifying name and filename remain stable.
 
 - Add, edit, and remove individual schedule rows, each with a weekday, start time, and end time. Multiple windows per day and different hours on different days are supported.
 - Defaults to five rows: **Monday–Friday, 09:00–18:00**. Automation is **paused on first setup**; enable it in the plugin settings or with the frontend icon.
@@ -22,7 +24,7 @@ Discord must be running to change the setting. Checks run every five seconds and
 
 ## FriendVoiceNotify
 
-Notifies you when a selected user joins a visible voice or stage channel on a shared server. Each notification includes the user's name, server name, and channel name.
+Version **1.1.0** notifies you when a selected user joins a visible voice or stage channel on a shared server. Each notification includes the user's name, server name, and channel name. Context-menu labels, settings, in-app alerts, and desktop notifications follow Discord's language. User, server, and channel names remain unchanged.
 
 - Right-click a user, for example in your friends list, and toggle the voice notification checkbox to enable or disable alerts for that user.
 - Selected users are saved per Discord account and remain selected after a restart.
@@ -33,19 +35,19 @@ Discord must be running and connected. The plugin only uses voice state data rec
 
 **File:** [FriendVoiceNotify.plugin.js](FriendVoiceNotify.plugin.js)
 
-## voiceIcon
+## Server Voice Counter
 
-Displays a **green speaker icon on the server icon** whenever at least one visible voice or stage channel on that server is occupied. This lets you spot active servers directly in the server list.
+Version **1.3.1** displays a **green speaker icon on the server icon** whenever at least one visible voice or stage channel on that server is occupied. This lets you spot active servers directly in the server list.
 
 - An optional **participant count** can be enabled in the plugin settings. It counts people in visible voice and stage channels, including yourself.
 - Also supports the server name layout provided by **DisplayServersAsChannels**, displaying the indicator next to the name.
 - The indicator updates as channel occupancy changes.
 
-**File:** [voiceIcon.plugin.js](voiceIcon.plugin.js)
+**File:** [voiceIcon.plugin.js](voiceIcon.plugin.js) (filename retained for compatible updates; formerly named voiceIcon). German and English follow Discord's language, with English as fallback. Existing participant-count settings are preserved. When upgrading from the old name, check the plugin's enabled switch: BetterDiscord stores activation separately by plugin name.
 
 ## Installation
 
-Requires the Discord desktop app with BetterDiscord installed. The voice plugins use English interface labels; Game Activity Toggle Erweiterung uses German labels. No build step or additional plugin library is required for these plugins. DisplayServersAsChannels integration is optional.
+Requires the Discord desktop app with BetterDiscord installed. All three plugins follow Discord's language (German or English, English fallback). No build step or additional plugin library is required for these plugins. DisplayServersAsChannels integration is optional; the Game Activity Toggle companion is only needed for the scheduler's frontend icon.
 
 1. Download the desired `.plugin.js` file from this repository.
 2. In Discord, go to **User Settings → BetterDiscord → Plugins → Open Plugins Folder**.
@@ -56,7 +58,7 @@ To update a plugin, replace its existing file and toggle the plugin off and on a
 
 ## Privacy and support
 
-FriendVoiceNotify stores your selected user IDs per account and notification preferences locally through BetterDiscord's Data API. Selecting a user opts into saving that selection. voiceIcon stores its participant-count preference locally. Game Activity Toggle Erweiterung stores its schedule, pause choice, and pending restoration states per account locally through the same API; activity-setting changes are sent through Discord. None of these plugins includes telemetry or keeps a history of voice activity. Desktop notifications may display names on your screen through the operating system.
+FriendVoiceNotify stores your selected user IDs per account and notification preferences locally through BetterDiscord's Data API. Selecting a user opts into saving that selection. Server Voice Counter stores its participant-count preference locally under the compatible legacy `voiceIcon` key. Game Activity Toggle Erweiterung stores its schedule, pause choice, and pending restoration states per account locally through the same API; activity-setting changes are sent through Discord. None of these plugins includes telemetry or keeps a history of voice activity. Desktop notifications may display names on your screen through the operating system.
 
 For bugs, use this repository's Issues page and include the plugin version, reproduction steps, and relevant errors with private information removed. Discord updates can change internal modules and break compatibility.
 
@@ -74,11 +76,17 @@ Before distributing an update, check loading and disabling in Discord, the user-
 
 ## Development checks
 
-For Game Activity Toggle Erweiterung (Node.js 25):
+Run syntax checks and each test file separately (Node.js 25; tests mock Discord globals):
 
 ```powershell
+node --check FriendVoiceNotify.plugin.js
 node --check GameActivityToggleExtension.plugin.js
+node --check voiceIcon.plugin.js
+node --test --test-isolation=none tests/FriendVoiceNotify.test.js
 node --test --test-isolation=none tests/GameActivityToggleExtension.test.js
+node --test --test-isolation=none tests/voiceIcon.test.js
 ```
 
-The 20 automated tests cover scheduling, overlaps, adjacent and overnight windows, configuration migration, pause/resume, restoration, simulated restarts, account isolation, failed writes, and settings controls. The user reported a successful functional test of the installed plugin. Live UI checks also verified icon placement, its hover and tooltip, the native settings switch, table controls, readable dropdown options, focus styling, and the full add-button label. Restart and failure recovery were tested with simulated Discord modules, not by restarting the live client.
+All **38 automated tests** pass: 28 for Game Activity Toggle Erweiterung, 4 for FriendVoiceNotify, and 6 for Server Voice Counter. They cover German/English and fallback behavior, language selection and refresh, settings persistence, notification text, participant counting and visibility filtering, scheduling, overlapping/adjacent/overnight windows, migration, pause/resume, account isolation, and restoration after simulated restarts or failed writes.
+
+The user confirmed successful live functionality for all three current plugins and the new Server Voice Counter name. Additional live UI checks verified the scheduler icon, hover and tooltip, settings switch, readable table controls, dropdown options, focus styling, and add-button label. Automated locale/failure/restart scenarios use mocked Discord modules; these tests do not guarantee compatibility with future Discord updates.

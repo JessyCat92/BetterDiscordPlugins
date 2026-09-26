@@ -1,24 +1,86 @@
 /**
- * @name voiceIcon
+ * @name Server Voice Counter
  * @author Jessi
- * @version 1.2.5
+ * @version 1.3.1
  * @description Show a green speaker indicator on servers with occupied visible voice or stage channels, with an optional participant count.
  * @authorLink https://github.com/JessyCat92
  * @website https://github.com/JessyCat92/BetterDiscordPlugins
  * @source https://github.com/JessyCat92/BetterDiscordPlugins/blob/main/voiceIcon.plugin.js
  */
 
+const LABELS = {
+    en: {
+        description: "Show a green speaker indicator on servers with occupied visible voice or stage channels, with an optional participant count.",
+        count: "Show participant count",
+        countNote: "Count people in all visible voice and stage channels on the server, including yourself.",
+        modulesError: "The required Discord data modules are unavailable.",
+        readError: "Server Voice Counter: Could not read Discord modules. See the console for details."
+    },
+    de: {
+        description: "Zeigt ein grünes Lautsprecher-Icon an Servern mit belegten sichtbaren Sprach- oder Stage-Kanälen, optional mit Personenzahl.",
+        count: "Personenzahl anzeigen",
+        countNote: "Zählt Personen in allen sichtbaren Sprach- und Stage-Kanälen des Servers, einschließlich dir selbst.",
+        modulesError: "Die benötigten Discord-Datenmodule sind nicht verfügbar.",
+        readError: "Server Voice Counter: Discord-Module konnten nicht gelesen werden. Details stehen in der Konsole."
+    }
+};
+
 module.exports = class VoiceIcon {
+    // Keep the legacy filename, CSS and Data namespace to preserve existing installations.
+    getName() { return "Server Voice Counter"; }
+
     // DisplayServersAsChannels 2.0.5 / BDFDB's dedicated class mapping.
     static channelNameSelector = ".styledGuildsAsChannels_71509e .name_71509e";
 
+    language() {
+        // Prefer Discord's selected language over the OS/browser language.
+        try {
+            this.localeStore ??= BdApi.Webpack.getStore("LocaleStore");
+            if (!this.localeStore) this.localeModule ??= BdApi.Webpack.getModule?.(value =>
+                typeof value?.chosenLocale === "string" || typeof value?._chosenLocale === "string", {searchExports: true});
+            const locale = this.localeStore?.getLocale?.() || this.localeModule?.chosenLocale ||
+                this.localeModule?._chosenLocale || globalThis.document?.documentElement?.getAttribute("lang") || "en";
+            return /^de(?:[-_]|$)/i.test(locale) ? "de" : "en";
+        }
+        catch { return "en"; }
+    }
+
+    t(key) { return LABELS[this.language()][key] ?? LABELS.en[key]; }
+
+    getDescription() { return this.t("description"); }
+
     getSettingsPanel() {
+        const plugin = this;
+        const React = BdApi.React;
+        return React.createElement(function VoiceIconSettings() {
+            const [, update] = React.useState(0);
+            React.useEffect(() => {
+                const refresh = () => update(value => value + 1);
+                plugin.language();
+                const store = plugin.localeStore;
+                const canSubscribe = typeof store?.addChangeListener === "function" &&
+                    typeof store?.removeChangeListener === "function";
+                if (canSubscribe) store.addChangeListener(refresh);
+                const observer = new MutationObserver(refresh);
+                observer.observe(document.documentElement, {attributes: true, attributeFilter: ["lang"]});
+                window.addEventListener("focus", refresh);
+                return () => {
+                    if (canSubscribe) store.removeChangeListener(refresh);
+                    observer.disconnect();
+                    window.removeEventListener("focus", refresh);
+                };
+            }, []);
+            return React.createElement("div", {lang: plugin.language()}, plugin.buildSettingsPanel());
+        });
+    }
+
+    buildSettingsPanel() {
         return BdApi.UI.buildSettingsPanel({
             settings: [{
                 type: "switch",
                 id: "showCount",
-                name: "Show participant count (- N)",
-                note: "Count people in all visible voice and stage channels on the server, including yourself.",
+                name: this.t("count"),
+                note: this.t("countNote"),
                 value: BdApi.Data.load("voiceIcon", "showCount") === true
             }],
             onChange: (_category, id, value) => {
@@ -43,7 +105,7 @@ module.exports = class VoiceIcon {
             if (typeof this.voice?.getAllVoiceStates !== "function" ||
                 typeof this.channels?.getChannel !== "function" ||
                 typeof this.permissions?.can !== "function") {
-                throw new Error("The required Discord data modules are unavailable.");
+                throw new Error(this.t("modulesError"));
             }
 
             // A pseudo-element avoids inserting children into Discord's React tree.
@@ -252,9 +314,9 @@ module.exports = class VoiceIcon {
     }
 
     fail(error) {
-        console.error("[voiceIcon]", error);
+        console.error("[Server Voice Counter]", error);
         this.stop();
-        BdApi.UI.showToast("voiceIcon: Could not read Discord modules. See the console for details.", {type: "error"});
+        BdApi.UI.showToast(this.t("readError"), {type: "error"});
     }
 
     stop() {

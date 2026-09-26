@@ -2,7 +2,7 @@ const {test, beforeEach} = require("node:test");
 const assert = require("node:assert/strict");
 const Plugin = require("../GameActivityToggleExtension.plugin.js");
 const RealDate = Date;
-let clock, data, store, users, writer, writes, plugin, failWrite;
+let clock, data, store, users, writer, writes, plugin, failWrite, locale, toasts;
 global.Date = class extends RealDate {
     constructor(...args) { super(...(args.length ? args : [clock])); }
 };
@@ -16,6 +16,8 @@ beforeEach(() => {
     users = {getCurrentUser: () => ({id: "alice"})};
     writes = [];
     failWrite = false;
+    locale = "de";
+    toasts = [];
     writer = {
         ProtoClass: {typeName: "discord.PreloadedUserSettings"},
         async updateAsync(category, callback) {
@@ -33,10 +35,10 @@ beforeEach(() => {
             delete: (_, key) => data.delete(key)
         },
         Webpack: {
-            getStore: name => name === "UserStore" ? users : store,
+            getStore: name => name === "LocaleStore" ? {getLocale: () => locale} : name === "UserStore" ? users : store,
             getModule: filter => [writer, {INFREQUENT_USER_ACTION: 0}].find(filter)
         },
-        UI: {showToast() {}, createTooltip: () => ({labelElement: {}, show() {}, hide() {}})}
+        UI: {showToast: text => toasts.push(text), createTooltip: () => ({labelElement: {}, show() {}, hide() {}})}
     };
     plugin = new Plugin();
     plugin.options = structuredClone(options);
@@ -284,4 +286,119 @@ test("settings use native switch and allow adding, editing, removing independent
     assert.equal(plugin.options.schedule[0].start, "09:00");
     nodes.find(node => node.props["aria-label"] === "Zeitfenster 6 entfernen").props.onClick();
     assert.equal(data.get("options").schedule.length, 5);
+});
+
+for (const [code, monday, add, enabled] of [["de", "Montag", "Zeitfenster hinzufügen", "Automatik aktivieren"],
+    ["de-DE", "Montag", "Zeitfenster hinzufügen", "Automatik aktivieren"],
+    ["en-US", "Monday", "Add time window", "Enable automation"], ["fr", "Monday", "Add time window", "Enable automation"]]) {
+    test(`settings, accessible labels and validation use Discord locale ${code}`, () => {
+        locale = code;
+        plugin.options = plugin.loadOptions();
+        plugin.running = false;
+        global.BdApi.React = {
+            createElement: (type, props, ...children) => ({type, props: props || {}, children}),
+            useState: () => [0, () => {}], useEffect: callback => callback()
+        };
+        global.BdApi.UI.buildSettingsPanel = props => ({type: "native-settings", props, children: []});
+        const component = plugin.getSettingsPanel();
+        const flatten = node => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === "object" ? [node, ...(node.children ?? []).flatMap(flatten)] : [];
+        const nodes = flatten(component.type());
+        assert.ok(nodes.some(node => node.type === "option" && node.props.value === 1 && node.children.includes(monday)));
+        assert.ok(nodes.some(node => node.children.includes(add)));
+        assert.equal(nodes.find(node => node.type === "native-settings").props.settings[0].name, enabled);
+        const start = nodes.find(node => node.props["aria-label"] === plugin.t("startRow", 1));
+        start.props.onChange({target: {value: "18:00"}});
+        assert.equal(toasts.at(-1), code.startsWith("de") ? "Bitte unterschiedliche, gültige Start- und Endzeiten wählen." : "Please choose valid, different start and end times.");
+        assert.equal(plugin.options.schedule[0].start, "09:00");
+        assert.ok(nodes.some(node => node.props["aria-label"] === plugin.t("removeRow", 1)));
+        assert.ok(!JSON.stringify(nodes).includes("{row}"));
+    });
+}
+
+test("Discord chosen locale and document language fallback never use system locale", () => {
+    BdApi.Webpack.getStore = () => undefined;
+    const chosen = {chosenLocale: "de"};
+    BdApi.Webpack.getModule = filter => filter(chosen) ? chosen : undefined;
+    global.document = {documentElement: {getAttribute: () => "en-US"}};
+    assert.equal(plugin.language(), "de");
+    chosen.chosenLocale = "en-GB";
+    assert.equal(plugin.language(), "en");
+    BdApi.Webpack.getModule = () => undefined;
+    const fallback = new Plugin();
+    document.documentElement.getAttribute = () => "de";
+    assert.equal(fallback.language(), "de");
+    document.documentElement.getAttribute = () => "ja";
+    assert.equal(fallback.language(), "en");
+    document.documentElement.getAttribute = () => null;
+    assert.equal(fallback.language(), "en");
+});
+
+test("language switch updates tooltip, accessible label and open settings without saving options", () => {
+    const attributes = {};
+    plugin.button = {setAttribute: (key, value) => { attributes[key] = value; }, style: {}, querySelector: () => ({style: {}})};
+    plugin.tooltip = {labelElement: {}};
+    let redraws = 0;
+    plugin.refreshSettings = () => redraws++;
+    const original = structuredClone(plugin.options);
+    plugin.refreshLanguage();
+    assert.equal(plugin.tooltip.labelElement.textContent, "Zeitsteuerung pausieren");
+    locale = "en-US";
+    plugin.refreshLanguage();
+    assert.equal(plugin.tooltip.labelElement.textContent, "Pause scheduling");
+    assert.equal(attributes["aria-label"], "Scheduling enabled – click to pause");
+    assert.equal(redraws, 2);
+    plugin.refreshLanguage();
+    assert.equal(redraws, 2);
+    plugin.options.enabled = false;
+    plugin.updateButton();
+    assert.equal(plugin.tooltip.labelElement.textContent, "Enable scheduling");
+    plugin.options.enabled = true;
+    assert.deepEqual(plugin.options, original);
+    assert.equal(data.size, 0);
+});
+
+test("failed writes report in English or German without losing the restoration record", async () => {
+    const oldError = console.error;
+    console.error = () => {};
+    failWrite = true;
+    try {
+        locale = "en-US";
+        await plugin.tick();
+        assert.match(toasts.at(-1), /^Activity scheduler:/);
+        locale = "de";
+        plugin.reportedError = false;
+        await plugin.tick();
+        assert.match(toasts.at(-1), /^Aktivitäts-Automatik:/);
+        assert.deepEqual(data.get("restore_alice"), {previous: true});
+    }
+    finally { console.error = oldError; }
+});
+
+test("language listeners and observers refresh once and are cleaned up on stop", () => {
+    const callbacks = new Set(), observers = [];
+    const localeStore = {getLocale: () => locale, addChangeListener: fn => callbacks.add(fn), removeChangeListener: fn => callbacks.delete(fn)};
+    const originalGetStore = BdApi.Webpack.getStore;
+    BdApi.Webpack.getStore = name => name === "LocaleStore" ? localeStore : originalGetStore(name);
+    global.document = {body: {}, documentElement: {getAttribute: () => locale}, querySelector: () => null};
+    global.window = {addEventListener() {}, removeEventListener() {}};
+    global.MutationObserver = class {
+        constructor(callback) { this.callback = callback; observers.push(this); }
+        observe() {}
+        disconnect() { this.disconnected = true; }
+    };
+    const instance = new Plugin();
+    let renders = 0;
+    instance.refreshSettings = () => renders++;
+    try {
+        instance.start();
+        assert.equal(callbacks.size, 1);
+        locale = "en-US";
+        for (const callback of callbacks) callback();
+        assert.equal(renders, 2);
+        observers[0].callback();
+        assert.equal(renders, 2);
+    }
+    finally { instance.stop(); }
+    assert.equal(callbacks.size, 0);
+    assert.ok(observers.every(observer => observer.disconnected));
 });

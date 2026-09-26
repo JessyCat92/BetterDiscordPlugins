@@ -1,8 +1,8 @@
 /**
  * @name Game Activity Toggle Erweiterung
  * @author Jessi
- * @version 1.1.3
- * @description Schaltet die Spielaktivitätsanzeige nach einem lokalen Wochenzeitplan aus und stellt danach den vorherigen Zustand wieder her.
+ * @version 1.2.0
+ * @description Schedules game activity visibility using local time and restores the previous setting. German and English UI follows Discord's language.
  * @authorLink https://github.com/JessyCat92
  * @website https://github.com/JessyCat92/BetterDiscordPlugins
  * @source https://github.com/JessyCat92/BetterDiscordPlugins/blob/main/GameActivityToggleExtension.plugin.js
@@ -10,8 +10,75 @@
 
 const DATA_KEY = "GameActivityToggleExtension";
 const DEFAULTS = {enabled: false, days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00"};
+const LABELS = {
+    en: {
+        description: "Schedules game activity visibility using local time and restores the previous setting.",
+        enabledToast: "Scheduling enabled", pausedToast: "Scheduling paused – manual control available",
+        activeLabel: "Scheduling enabled – click to pause", pausedLabel: "Scheduling paused – click to enable",
+        pause: "Pause scheduling", enable: "Enable scheduling",
+        modulesError: "Discord settings modules are not available yet.",
+        writeError: "Activity scheduler: setting unavailable. Restoration remains saved; the plugin will retry while enabled.",
+        invalidTime: "Please choose valid, different start and end times.",
+        days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+        day: "Weekday", start: "Start", end: "End", action: "Action", schedule: "Schedule",
+        dayRow: "Weekday, row {row}", startRow: "Start, row {row}", endRow: "End, row {row}", removeRow: "Remove time window {row}",
+        remove: "Remove", add: "Add time window", automation: "Enable automation",
+        pauseNote: "Pause to use the manual Game Activity Toggle freely. Your choice persists across restarts.",
+        scheduleNote: "Local computer time; checked every 5 seconds. Multiple windows per day are supported. For overnight windows, select the start day. Overlapping and adjacent windows stay active continuously.",
+        empty: "No time windows: game activity will not be disabled automatically.",
+        iconNote: "The controller-and-clock icon appears beside the visible Game Activity Toggle in the user panel. If that button is absent, control automation here."
+    },
+    de: {
+        description: "Schaltet die Spielaktivitätsanzeige nach einem lokalen Wochenzeitplan aus und stellt danach den vorherigen Zustand wieder her.",
+        enabledToast: "Zeitsteuerung aktiviert", pausedToast: "Zeitsteuerung pausiert – manuelle Steuerung frei",
+        activeLabel: "Zeitsteuerung aktiv – klicken zum Pausieren", pausedLabel: "Zeitsteuerung pausiert – klicken zum Aktivieren",
+        pause: "Zeitsteuerung pausieren", enable: "Zeitsteuerung aktivieren",
+        modulesError: "Discord-Einstellungsmodule sind noch nicht verfügbar.",
+        writeError: "Aktivitäts-Automatik: Einstellung nicht erreichbar. Wiederherstellung bleibt gespeichert; bei aktivem Plugin wird erneut versucht.",
+        invalidTime: "Bitte unterschiedliche, gültige Start- und Endzeiten wählen.",
+        days: ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"],
+        day: "Wochentag", start: "Beginn", end: "Ende", action: "Aktion", schedule: "Zeitplan",
+        dayRow: "Wochentag Zeile {row}", startRow: "Beginn Zeile {row}", endRow: "Ende Zeile {row}", removeRow: "Zeitfenster {row} entfernen",
+        remove: "Entfernen", add: "Zeitfenster hinzufügen", automation: "Automatik aktivieren",
+        pauseNote: "Pausieren gibt den manuellen Game-Activity-Schalter frei. Die Wahl bleibt nach Neustarts erhalten.",
+        scheduleNote: "Lokale Rechnerzeit; Prüfung alle 5 Sekunden. Mehrere Zeitfenster je Tag sind möglich. Bei Zeitfenstern über Mitternacht gilt der Tag als Starttag. Überlappende und direkt anschließende Fenster bleiben durchgehend aktiv.",
+        empty: "Keine Zeitfenster: Die Aktivitätsanzeige wird nicht automatisch ausgeschaltet.",
+        iconNote: "Das Controller-Uhr-Icon erscheint unmittelbar neben dem sichtbaren Game Activity Toggle im Benutzerbereich. Fehlt dieser Schalter, lässt sich die Automatik hier bedienen."
+    }
+};
 
 module.exports = class GameActivityToggleExtension {
+    language() {
+        // Follow Discord's chosen locale, as BDFDB does, without its OS-locale fallback.
+        if (!this.localeResolved) {
+            this.localeStore = BdApi.Webpack.getStore("LocaleStore");
+            this.localeModule = BdApi.Webpack.getModule(value =>
+                typeof value?.chosenLocale === "string" || typeof value?._chosenLocale === "string", {searchExports: true});
+            this.localeResolved = true;
+        }
+        const stored = this.localeStore?.getLocale?.();
+        const locale = stored || this.localeModule?.chosenLocale || this.localeModule?._chosenLocale ||
+            globalThis.document?.documentElement?.getAttribute("lang") || "en";
+        return /^de(?:[-_]|$)/i.test(locale) ? "de" : "en";
+    }
+
+    t(key, row) {
+        const value = LABELS[this.language()][key] ?? LABELS.en[key];
+        return typeof value === "string" ? value.replace("{row}", String(row ?? "")) : value;
+    }
+
+    getDescription() { return this.t("description"); }
+
+    refreshLanguage() {
+        // Retry discovery after startup if Discord's modules were not ready yet.
+        if (!this.localeStore && !this.localeModule) this.localeResolved = false;
+        const language = this.language();
+        if (language === this.lastLanguage) return;
+        this.lastLanguage = language;
+        this.updateButton();
+        this.refreshSettings?.();
+    }
+
     static minutes(value) {
         if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
         return Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
@@ -61,6 +128,13 @@ module.exports = class GameActivityToggleExtension {
         if (this.running) return;
         this.options = this.loadOptions();
         this.running = true;
+        this.refreshLanguage();
+        this.localeChange = () => this.refreshLanguage();
+        if (typeof this.localeStore?.addChangeListener === "function" && typeof this.localeStore?.removeChangeListener === "function") {
+            this.localeStore.addChangeListener(this.localeChange);
+        }
+        this.languageObserver = new MutationObserver(() => this.refreshLanguage());
+        this.languageObserver.observe(document.documentElement, {attributes: true, attributeFilter: ["lang"]});
         BdApi.DOM.addStyle(DATA_KEY, `
             .gat-extension-button:hover,
             .gat-extension-button:focus-visible {
@@ -70,7 +144,7 @@ module.exports = class GameActivityToggleExtension {
         this.mountButton();
         this.observer = new MutationObserver(() => this.mountButton());
         this.observer.observe(document.body, {childList: true, subtree: true});
-        this.wake = () => this.tick();
+        this.wake = () => { this.refreshLanguage(); this.tick(); };
         window.addEventListener("focus", this.wake);
         this.timer = setInterval(this.wake, 5000);
         this.tick();
@@ -79,6 +153,8 @@ module.exports = class GameActivityToggleExtension {
     stop() {
         this.running = false;
         this.observer?.disconnect();
+        this.languageObserver?.disconnect();
+        if (this.localeChange) this.localeStore?.removeChangeListener?.(this.localeChange);
         this.tooltip?.hide();
         this.tooltip = null;
         this.button?.remove();
@@ -116,7 +192,7 @@ module.exports = class GameActivityToggleExtension {
             this.button.addEventListener("click", () => {
                 this.options.enabled = !this.options.enabled;
                 this.saveOptions();
-                BdApi.UI.showToast(this.options.enabled ? "Zeitsteuerung aktiviert" : "Zeitsteuerung pausiert – manuelle Steuerung frei", {type: "info"});
+                BdApi.UI.showToast(this.t(this.options.enabled ? "enabledToast" : "pausedToast"), {type: "info"});
             });
             this.tooltip = BdApi.UI.createTooltip(this.button, "", {side: "top", disabled: false});
             this.button.addEventListener("focus", () => this.tooltip?.show());
@@ -136,8 +212,8 @@ module.exports = class GameActivityToggleExtension {
     updateButton() {
         if (!this.button) return;
         const enabled = this.options.enabled;
-        const label = enabled ? "Zeitsteuerung aktiv – klicken zum Pausieren" : "Zeitsteuerung pausiert – klicken zum Aktivieren";
-        if (this.tooltip) this.tooltip.labelElement.textContent = enabled ? "Zeitsteuerung pausieren" : "Zeitsteuerung aktivieren";
+        const label = this.t(enabled ? "activeLabel" : "pausedLabel");
+        if (this.tooltip) this.tooltip.labelElement.textContent = this.t(enabled ? "pause" : "enable");
         this.button.setAttribute("aria-label", label);
         this.button.setAttribute("aria-pressed", String(enabled));
         this.button.style.color = enabled ? "#fff" : "var(--status-danger,#f23f43)";
@@ -154,7 +230,7 @@ module.exports = class GameActivityToggleExtension {
         // Same action type and protobuf path as the installed BDFDB/GameActivityToggle.
         this.actionTypes = BdApi.Webpack.getModule(value => value != null &&
             typeof value.INFREQUENT_USER_ACTION === "number", {searchExports: true});
-        if (!this.users || !this.settings || !this.writer) throw new Error("Discord-Einstellungsmodule sind noch nicht verfügbar.");
+        if (!this.users || !this.settings || !this.writer) throw new Error(this.t("modulesError"));
     }
 
     currentValue() {
@@ -198,7 +274,7 @@ module.exports = class GameActivityToggleExtension {
         catch (error) {
             if (!this.reportedError) {
                 console.error(`[${DATA_KEY}]`, error);
-                BdApi.UI.showToast("Aktivitäts-Automatik: Einstellung nicht erreichbar. Wiederherstellung bleibt gespeichert; bei aktivem Plugin wird erneut versucht.", {type: "error"});
+                BdApi.UI.showToast(this.t("writeError"), {type: "error"});
                 this.reportedError = true;
             }
         }
@@ -217,9 +293,9 @@ module.exports = class GameActivityToggleExtension {
         const React = BdApi.React;
         const h = React.createElement;
         const Button = BdApi.Components.Button;
-        const weekdays = [[1, "Montag"], [2, "Dienstag"], [3, "Mittwoch"], [4, "Donnerstag"], [5, "Freitag"], [6, "Samstag"], [0, "Sonntag"]];
         return h(function ScheduleSettings() {
             const [, redraw] = React.useState(0);
+            const weekdays = [1, 2, 3, 4, 5, 6, 0].map(day => [day, plugin.t("days")[day]]);
             React.useEffect(() => {
                 const refresh = () => redraw(value => value + 1);
                 plugin.refreshSettings = refresh;
@@ -228,7 +304,7 @@ module.exports = class GameActivityToggleExtension {
             const change = (index, key, value) => {
                 const row = {...plugin.options.schedule[index], [key]: value};
                 if (PluginTimeInvalid(row)) {
-                    BdApi.UI.showToast("Bitte unterschiedliche, gültige Start- und Endzeiten wählen.", {type: "error"});
+                    BdApi.UI.showToast(plugin.t("invalidTime"), {type: "error"});
                     redraw(value => value + 1);
                     return;
                 }
@@ -238,18 +314,18 @@ module.exports = class GameActivityToggleExtension {
             const PluginTimeInvalid = row => plugin.constructor.minutes(row.start) === null ||
                 plugin.constructor.minutes(row.end) === null || row.start === row.end;
             const rows = plugin.options.schedule.map((row, index) => h("tr", {key: index},
-                h("td", null, h("select", {className: "gat-schedule-input gat-schedule-day", value: row.day, "aria-label": `Wochentag Zeile ${index + 1}`,
+                h("td", null, h("select", {className: "gat-schedule-input gat-schedule-day", value: row.day, "aria-label": plugin.t("dayRow", index + 1),
                     onChange: event => change(index, "day", Number(event.target.value))},
                     weekdays.map(([day, name]) => h("option", {key: day, value: day}, name)))),
                 ...["start", "end"].map(key => h("td", {key}, h("input", {type: "time", required: true, className: "bd-text-input gat-schedule-input gat-schedule-time",
-                    value: row[key], "aria-label": `${key === "start" ? "Beginn" : "Ende"} Zeile ${index + 1}`,
+                    value: row[key], "aria-label": plugin.t(`${key}Row`, index + 1),
                     onChange: event => change(index, key, event.target.value)}))),
                 h("td", null, h(Button, {type: "button", className: "gat-schedule-remove", color: Button.Colors.RED, look: Button.Looks.FILLED, size: Button.Sizes.SMALL, grow: false,
-                    "aria-label": `Zeitfenster ${index + 1} entfernen`, onClick: () => {
+                    "aria-label": plugin.t("removeRow", index + 1), onClick: () => {
                         plugin.options.schedule.splice(index, 1);
                         plugin.saveOptions();
-                    }}, "Entfernen"))));
-            return h("div", {className: "gat-schedule-settings", style: {color: "var(--text-normal)", padding: 16}},
+                    }}, plugin.t("remove")))));
+            return h("div", {className: "gat-schedule-settings", lang: plugin.language(), style: {color: "var(--text-normal)", padding: 16}},
                 h("style", null, `
                     .gat-schedule-settings .gat-schedule-input {
                         box-sizing: border-box; min-height: 38px; width: 100%;
@@ -279,20 +355,20 @@ module.exports = class GameActivityToggleExtension {
                     .gat-schedule-settings th { padding-bottom: 4px; font-weight: 600; }
                 `),
                 BdApi.UI.buildSettingsPanel({settings: [{type: "switch", id: "enabled",
-                    name: "Automatik aktivieren", note: "Pausieren gibt den manuellen Game-Activity-Schalter frei. Die Wahl bleibt nach Neustarts erhalten.",
+                    name: plugin.t("automation"), note: plugin.t("pauseNote"),
                     value: plugin.options.enabled}], onChange: (_category, id, value) => {
                         if (id === "enabled") { plugin.options.enabled = value === true; plugin.saveOptions(); }
                     }}),
-                h("p", null, "Lokale Rechnerzeit; Prüfung alle 5 Sekunden. Mehrere Zeitfenster je Tag sind möglich. Bei Zeitfenstern über Mitternacht gilt der Tag als Starttag. Überlappende und direkt anschließende Fenster bleiben durchgehend aktiv."),
-                h("div", {style: {overflowX: "auto"}}, h("table", {style: {width: "100%", borderSpacing: "8px"}, "aria-label": "Zeitplan"},
-                    h("thead", null, h("tr", null, ...["Wochentag", "Beginn", "Ende", "Aktion"].map(label => h("th", {key: label, scope: "col", style: {textAlign: "left"}}, label)))),
+                h("p", null, plugin.t("scheduleNote")),
+                h("div", {style: {overflowX: "auto"}}, h("table", {style: {width: "100%", borderSpacing: "8px"}, "aria-label": plugin.t("schedule")},
+                    h("thead", null, h("tr", null, ...["day", "start", "end", "action"].map(key => h("th", {key, scope: "col", style: {textAlign: "left"}}, plugin.t(key))))),
                     h("tbody", null, ...rows))),
-                !rows.length && h("p", null, "Keine Zeitfenster: Die Aktivitätsanzeige wird nicht automatisch ausgeschaltet."),
+                !rows.length && h("p", null, plugin.t("empty")),
                 h(Button, {type: "button", className: "gat-schedule-add", color: Button.Colors.BRAND, look: Button.Looks.FILLED, size: Button.Sizes.MEDIUM, grow: false, onClick: () => {
                     plugin.options.schedule.push({day: 1, start: "09:00", end: "18:00"});
                     plugin.saveOptions();
-                }}, "Zeitfenster hinzufügen"),
-                h("p", null, "Die Uhr erscheint unmittelbar neben dem sichtbaren Game Activity Toggle im Benutzerbereich. Fehlt dieser Schalter, lässt sich die Automatik hier bedienen."));
+                }}, plugin.t("add")),
+                h("p", null, plugin.t("iconNote")));
         });
     }
 };
